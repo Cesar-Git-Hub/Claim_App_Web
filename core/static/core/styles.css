@@ -1,0 +1,51 @@
+/* styles.css */
+
+/* Fondo general */
+body {
+  background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+  min-height: 100vh;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Tarjeta de login */
+.card {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Botón principal */
+.btn-primary {
+  background-color: #2575fc;
+  border: none;
+  transition: background 0.3s ease;
+}
+
+.btn-primary:hover {
+  background-color: #1a5edb;
+}
+
+/* Input fields */
+.form-control {
+  border-radius: 8px;
+  padding: 10px;
+}
+
+/* Título del login */
+h3 {
+  font-weight: 600;
+  color: #333;
+}
+/* styles.css */
+input[type="file"]::file-selector-button {
+  background-color: #2575fc;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background-color: #1a5edb;
+}
