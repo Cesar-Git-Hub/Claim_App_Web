@@ -1,6 +1,6 @@
 asgiref==3.12.1
 et_xmlfile==2.0.0
-numpy==2.5.2
+numpy>=1.26,<2.3
 Django>=5.0,<6.0
 pandas
 openpyxl
