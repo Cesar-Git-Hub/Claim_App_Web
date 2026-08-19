@@ -14,5 +14,5 @@ ClaimApp es una aplicación web desarrollada en **Django** que permite:
 
 1. Clona el repositorio:
    ```bash
-   git clone https://github.com/TuUsuario/ClaimApp_Django.git
-   cd ClaimApp_Django
+   git clone https://github.com/Cesar-Git-Hub/Claim_App__Web.git
+   cd Claim_App__Web
