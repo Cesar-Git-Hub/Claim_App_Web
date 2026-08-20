@@ -4,37 +4,67 @@
 
 <h2 class="mb-4">Dashboard</h2>
 
+<!-- Buscador -->
 <form method="get" class="d-flex mb-3">
   <input type="text" name="q" class="form-control me-2" placeholder="Buscar...">
   <button type="submit" class="btn btn-primary">Buscar</button>
 </form>
 
-<div class="btn-group mb-3">
-  <a href="?filter=zero" class="btn btn-outline-danger">Valores en 0</a>
-  <a href="?filter=code50" class="btn btn-outline-warning">Código 50</a>
-  <a href="?filter=duplicates" class="btn btn-outline-info">Duplicados</a>
-</div>
+<!-- Botones de acciones -->
+<form method="post" class="mb-3">
+  {% csrf_token %}
+  <div class="btn-group">
+    <button type="submit" name="btn_valores_cero" class="btn btn-outline-danger">Valores en 0</button>
+    <button type="submit" name="btn_codigos_50" class="btn btn-outline-warning">Código 50</button>
+    <button type="submit" name="btn_duplicados" class="btn btn-outline-info">Duplicados</button>
+    <button type="submit" name="btn_eliminar_marcadas" class="btn btn-danger">Eliminar Marcadas</button>
+    <button type="submit" name="btn_limpiar" class="btn btn-secondary">Limpiar Data</button>
+  </div>
+</form>
 
+<!-- Tabla -->
 <table class="table table-striped table-hover">
   <thead class="table-dark">
     <tr>
-      <th>Col1</th>
-      <th>Col2</th>
-      <th>Col4</th>
-      <th>Status</th>
+      <th>Date Marked</th>
+      <th>Dated and Time</th>
+      <th>Account</th>
+      <th>Mark Type</th>
+      <th>Amount</th>
+      <th>Trxn Code</th>
+      <th>Merchants</th>
+      <th>Entry Mode</th>
+      <th>Respond Code</th>
+      <th>ECI</th>
+      <th>Approval Code</th>
+      <th>Customer ID</th>
+      <th>Extra1</th>
+      <th>Extra2</th>
     </tr>
   </thead>
   <tbody>
     {% for claim in claims %}
-      <tr {% if claim.to_delete %} class="table-success" {% endif %}>
+      <tr {% if claim.to_delete %} class="table-danger" {% endif %}>
         <td>{{ claim.col1 }}</td>
         <td>{{ claim.col2 }}</td>
-        <td>{{ claim.col4 }}</td>
+        <td>{{ claim.col3 }}</td>
         <td>{{ claim.col5 }}</td>
+        <td>{{ claim.col4 }}</td>
+        <td>{{ claim.col6 }}</td>
+        <td>{{ claim.col7 }}</td>
+        <td>{{ claim.col8 }}</td>
+        <td>{{ claim.col9 }}</td>
+        <td>{{ claim.col10 }}</td>
+        <td>{{ claim.col11 }}</td>
+        <td>{{ claim.col12 }}</td>
+        <td>{{ claim.col13 }}</td>
+        <td>{{ claim.col14 }}</td>
       </tr>
     {% endfor %}
   </tbody>
 </table>
+
+<!-- Subida de archivo -->
 <form method="post" enctype="multipart/form-data" class="mb-3">
   {% csrf_token %}
   <div class="input-group">
@@ -42,11 +72,22 @@
     <button type="submit" class="btn btn-success">Cargar archivo</button>
   </div>
 </form>
+
+<!-- Total -->
 <div class="alert alert-info">
   <strong>Total:</strong> {{ total }}
 </div>
 
+<!-- Mensajes -->
+{% if messages %}
+  <div>
+    {% for message in messages %}
+      <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<!-- Logout -->
 <a href="{% url 'logout' %}" class="btn btn-secondary">Cerrar sesión</a>
 
 {% endblock %}
-

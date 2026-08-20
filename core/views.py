@@ -1,19 +1,107 @@
-# core/views.py
 import logging
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import re
+import traceback
 
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Sum, Q
 
 import pandas as pd
 
 from .models import Claim
 
 logger = logging.getLogger(__name__)
+
+SHOW_TRACE_IN_MESSAGES = False
+DECIMAL_QUANT = Decimal("0.01")
+
+# ------------------------
+# Funciones auxiliares
+# ------------------------
+
+def normalize_number_str(s: str) -> str:
+    if s is None:
+        return "0"
+    s = str(s).strip()
+    if s == "":
+        return "0"
+    s = re.sub(r"\s+", "", s)
+    if not re.search(r"\d", s):
+        return "0"
+    sign = ""
+    if s.startswith("+") or s.startswith("-"):
+        sign = s[0]
+        s = s[1:]
+    if "." in s and "," in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "")
+            s = s.replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    else:
+        if "," in s and "." not in s:
+            s = s.replace(",", ".")
+    s = re.sub(r"[^0-9.\-+]", "", s)
+    if s in ["", ".", "+", "-"]:
+        return "0"
+    return sign + s
+
+def safe_parse_decimal(value):
+    try:
+        normalized = normalize_number_str(value)
+        return Decimal(normalized).quantize(DECIMAL_QUANT, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0.00")
+
+def safe_parse_int(value):
+    try:
+        return int(float(value))
+    except Exception:
+        return 0
+
+# ------------------------
+# Funciones de filtrado
+# ------------------------
+
+def marcar_valores_cero(df):
+    df["ToDelete"] = df["Amount"].apply(lambda x: safe_parse_decimal(x) == Decimal("0.00"))
+    return df
+
+def marcar_codigos_50(df):
+    df["ToDelete"] = df["Respond Code"].apply(lambda x: safe_parse_int(x) == 50)
+    return df
+
+def marcar_duplicados(df):
+    df["ToDelete"] = False
+    df["Trxn Code"] = df["Trxn Code"].str.strip().str.upper()
+    df["Merchants"] = df["Merchants"].str.strip().str.upper()
+
+    grouped = df.groupby(["Amount", "Merchants"])
+    for (amount, merchant), group in grouped:
+        tipos = set(group["Trxn Code"].tolist())
+
+        # Caso 1: OR/OM junto con OT/OS → eliminar todos
+        if ("OR" in tipos or "OM" in tipos) and ("OT" in tipos or "OS" in tipos):
+            df.loc[group.index, "ToDelete"] = True
+
+        # Caso 2: OT y OS → eliminar solo OS
+        elif "OT" in tipos and "OS" in tipos:
+            df.loc[group[group["Trxn Code"] == "OS"].index, "ToDelete"] = True
+
+        # Caso 3: OS sin OT/OR/OM → se conserva
+        # Caso 4: OT sin match → se conserva
+    return df
+
+def eliminar_marcadas():
+    Claim.objects.filter(to_delete=True).delete()
+
+# ------------------------
+# Autenticación
+# ------------------------
 
 def user_login(request):
     if request.method == "POST":
@@ -31,86 +119,103 @@ def user_logout(request):
     logout(request)
     return redirect("login")
 
+# ------------------------
+# Dashboard principal
+# ------------------------
+
 @login_required
 def dashboard(request):
-    # Datos por defecto para renderizar
     claims_qs = Claim.objects.all()
 
     if request.method == "POST":
+        if "btn_limpiar" in request.POST:
+            Claim.objects.all().delete()
+            messages.success(request, "Toda la data ha sido limpiada correctamente.")
+            return redirect("dashboard")
+
+        if "btn_eliminar_marcadas" in request.POST:
+            eliminar_marcadas()
+            messages.success(request, "Transacciones marcadas eliminadas correctamente.")
+            return redirect("dashboard")
+
         uploaded = request.FILES.get("file")
         if not uploaded:
             messages.error(request, "No se seleccionó ningún archivo.")
             return redirect("dashboard")
 
         filename = uploaded.name.lower()
+
         try:
-            # Leer archivo
+            # Leer archivo SIN encabezados
             if filename.endswith(".csv"):
-                df = pd.read_csv(uploaded, dtype=str)  # leer como str para normalizar
+                df = pd.read_csv(uploaded, header=None, dtype=str)
             elif filename.endswith((".xls", ".xlsx")):
-                # Asegúrate de tener openpyxl instalado: pip install openpyxl
-                df = pd.read_excel(uploaded, engine="openpyxl", dtype=str)
+                df = pd.read_excel(uploaded, header=None, engine="openpyxl", dtype=str)
             else:
                 messages.error(request, "Formato no soportado. Usa .csv, .xls o .xlsx.")
                 return redirect("dashboard")
 
-            # Limitar tamaño para evitar OOM y seleccionar primeras 22 columnas
-            df = df.iloc[:6000, :22]
+            # Asignar encabezados predeterminados (12 columnas)
+            df.columns = [
+                "Date Marked", "Dated and Time", "Account", "Mark Type", "Amount",
+                "Trxn Code", "Merchants", "Entry Mode", "Respond Code", "ECI",
+                "Approval Code", "Customer ID"
+            ]
 
-            # Quitar espacios en columnas de texto
+            df = df.iloc[:6000, :].copy()
+
             for col in df.select_dtypes(include=["object"]).columns:
                 df[col] = df[col].astype(str).str.strip()
 
-            # --- Conversión segura de la columna que mapea a col4 ---
-            # Ajusta col4_index si la columna numérica está en otra posición
-            col4_index = 4
-            if df.shape[1] <= col4_index:
-                messages.error(request, "El archivo no contiene la columna esperada para col4.")
-                return redirect("dashboard")
+            if "btn_valores_cero" in request.POST:
+                df = marcar_valores_cero(df)
+            elif "btn_codigos_50" in request.POST:
+                df = marcar_codigos_50(df)
+            elif "btn_duplicados" in request.POST:
+                df = marcar_duplicados(df)
 
-            # Intentar convertir a numérico; valores inválidos -> NaN
-            df.iloc[:, col4_index] = pd.to_numeric(df.iloc[:, col4_index].str.replace(",", "."), errors="coerce")
-
-            # Rellenar NaN con 0 (o cambiar a dropna() si prefieres eliminar filas)
-            df.iloc[:, col4_index] = df.iloc[:, col4_index].fillna(0)
-
-            # Construir lista de instancias Claim con conversión a Decimal segura
             claims_to_create = []
-            for _, row in df.iterrows():
-                raw_val = row.iloc[col4_index]
+            for i, row in df.iterrows():
                 try:
-                    col4_val = Decimal(str(raw_val))
-                except (InvalidOperation, TypeError, ValueError):
-                    col4_val = Decimal("0.00")
+                    claim = Claim(
+                        col1=row.get("Date Marked"),
+                        col2=row.get("Dated and Time"),
+                        col3=row.get("Account"),
+                        col4=safe_parse_decimal(row.get("Amount")),
+                        col5=row.get("Mark Type"),
+                        col6=row.get("Trxn Code"),
+                        col7=row.get("Merchants"),
+                        col8=row.get("Entry Mode"),
+                        col9=row.get("Respond Code"),
+                        col10=row.get("ECI"),
+                        col11=row.get("Approval Code"),
+                        col12=row.get("Customer ID"),
+                        to_delete=row.get("ToDelete", False),
+                    )
+                    claims_to_create.append(claim)
+                except Exception as ex:
+                    logger.warning("Fila %s inválida: %s", i, ex)
 
-                claims_to_create.append(Claim(
-                    col1 = row.iloc[0] if df.shape[1] > 0 else None,
-                    col2 = row.iloc[1] if df.shape[1] > 1 else None,
-                    col3 = row.iloc[2] if df.shape[1] > 2 else None,
-                    col4 = col4_val,
-                    col5 = row.iloc[5] if df.shape[1] > 5 else None,
-                    col6 = row.iloc[6] if df.shape[1] > 6 else None,
-                    to_delete = False
-                ))
-
-            # Insertar en la BD por chunks dentro de una transacción
             chunk_size = 1000
             with transaction.atomic():
-                for i in range(0, len(claims_to_create), chunk_size):
-                    Claim.objects.bulk_create(claims_to_create[i:i+chunk_size])
+                for start in range(0, len(claims_to_create), chunk_size):
+                    Claim.objects.bulk_create(claims_to_create[start:start + chunk_size])
 
             messages.success(request, f"Archivo procesado correctamente. {len(claims_to_create)} filas importadas.")
             return redirect("dashboard")
 
         except Exception as e:
-            logger.exception("Error procesando archivo subido")
-            messages.error(request, "Ocurrió un error al procesar el archivo. Revisa el formato y el contenido.")
+            logger.exception("Error procesando archivo subido: %s", e)
+            if SHOW_TRACE_IN_MESSAGES:
+                messages.error(request, f"Error procesando archivo: {e}")
+                messages.error(request, traceback.format_exc())
+            else:
+                messages.error(request, "Error procesando archivo. Revisa los logs para más detalles.")
             return redirect("dashboard")
 
-    # GET: aplicar filtros y mostrar
     q = request.GET.get("q")
     if q:
-        claims_qs = claims_qs.filter(col1__icontains=q) | claims_qs.filter(col2__icontains=q)
+        claims_qs = claims_qs.filter(Q(col1__icontains=q) | Q(col2__icontains=q))
 
-    total = claims_qs.aggregate(total=Sum("col4"))["total"] or 0
+    total = claims_qs.aggregate(total=Sum("col4"))["total"] or Decimal("0.00")
     return render(request, "core/dashboard.html", {"claims": claims_qs, "total": total})
