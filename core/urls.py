@@ -1,9 +1,13 @@
+from django.contrib.auth.views import LoginView, LogoutView
 from django.urls import path
+
 from . import views
 
 urlpatterns = [
-    path('login/', views.user_login, name='login'),
-    path('logout/', views.user_logout, name='logout'),
-    path('', views.dashboard, name='dashboard'),  # dashboard como página principal
+    path("login/", LoginView.as_view(template_name="core/login.html", redirect_authenticated_user=True), name="login"),
+    path("logout/", LogoutView.as_view(), name="logout"),  # POST only
+    path("registro/", views.signup, name="signup"),
+    path("", views.dashboard, name="dashboard"),
+    path("upload/", views.upload, name="upload"),
+    path("action/", views.action, name="action"),
 ]
-
